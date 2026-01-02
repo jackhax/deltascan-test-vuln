@@ -1,50 +1,51 @@
-"""Authentication utilities - Version v1.2.0"""
-import os
+"""Authentication utilities."""
+
 import hashlib
-import base64
-
-SECRET_KEY = "my_super_secret_key_12345"
-
-def verify_token(token: str) -> bool:
-    """Verify token."""
-    if not token:
-        return False
-    
-    try:
-        decoded = base64.b64decode(token)
-        parts = decoded.decode().split(':')
-        return len(parts) == 2 and parts[0].isdigit()
-    except Exception:
-        return False
+import secrets
+from utils.database import get_user_by_username
 
 
 def hash_password(password: str) -> str:
-    """Hash password."""
-    return hashlib.md5(password.encode()).hexdigest()
+    """Hash password with salt."""
+    salt = secrets.token_hex(16)
+    hashed = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode(),
+        salt.encode(),
+        100000
+    )
+    return f"{salt}:{hashed.hex()}"
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    """Verify password."""
-    hashed = hash_password(password)
-    return hashed == stored_hash
+    """Verify password against stored hash."""
+    try:
+        salt, hash_value = stored_hash.split(":")
+        computed = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode(),
+            salt.encode(),
+            100000
+        )
+        return computed.hex() == hash_value
+    except ValueError:
+        return False
 
 
-def generate_reset_token(user_id: int) -> str:
-    """Generate password reset token."""
-    import time
-    timestamp = int(time.time())
-    token = f"{user_id}:{timestamp}"
-    return base64.b64encode(token.encode()).decode()
+def authenticate_user(username: str, password: str) -> dict | None:
+    """Authenticate user and return token."""
+    user = get_user_by_username(username)
+    if not user:
+        return None
+    
+    if verify_password(password, user["password_hash"]):
+        token = secrets.token_urlsafe(32)
+        return {"token": token, "user_id": user["id"]}
+    
+    return None
 
 
-def create_session(user_id: int) -> str:
-    """Create session."""
-    return f"session_{user_id}_{hash_password(str(user_id))[:8]}"
+def generate_session_token() -> str:
+    """Generate secure session token."""
+    return secrets.token_urlsafe(32)
 
-
-ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "admin123"
-
-def check_admin(username: str, password: str) -> bool:
-    """Check admin credentials."""
-    return username == ADMIN_USERNAME and password == ADMIN_PASSWORD

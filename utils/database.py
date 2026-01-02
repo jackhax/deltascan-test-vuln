@@ -1,44 +1,70 @@
-"""Database utilities - Version v1.2.0"""
-import os
-import psycopg2
+"""Database utilities."""
 
-DB_PASSWORD = "super_secret_password_123"
-DB_USER = "admin"
+import sqlite3
+from contextlib import contextmanager
 
-def get_db_connection():
+DATABASE_PATH = "app.db"
+
+
+@contextmanager
+def get_connection():
     """Get database connection."""
-    return psycopg2.connect(
-        host=os.environ.get('DB_HOST', 'localhost'),
-        port=os.environ.get('DB_PORT', 5432),
-        database=os.environ.get('DB_NAME', 'app'),
-        user=DB_USER,
-        password=DB_PASSWORD,
-        sslmode='disable'
-    )
+    conn = sqlite3.connect(DATABASE_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
-def execute_query(query: str, params: tuple = None):
-    """Execute a query with parameters."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(query, params)
-    result = cursor.fetchall()
-    conn.close()
-    return result
+def init_database():
+    """Initialize database schema."""
+    with get_connection() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
 
 
-def execute_raw_query(query: str):
-    """Execute raw query."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(query)
-    result = cursor.fetchall()
-    conn.close()
-    return result
+def get_user_by_id(user_id: int) -> dict | None:
+    """Get user by ID using parameterized query."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "SELECT id, username, email, created_at FROM users WHERE id = ?",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+    return None
 
 
-def backup_database(backup_path: str):
-    """Backup database."""
-    import subprocess
-    cmd = f"pg_dump -h localhost -U {DB_USER} app > {backup_path}"
-    subprocess.run(cmd, shell=True)
+def get_user_by_username(username: str) -> dict | None:
+    """Get user by username using parameterized query."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "SELECT id, username, email, password_hash FROM users WHERE username = ?",
+            (username,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return dict(row)
+    return None
+
+
+def create_user(username: str, email: str, password_hash: str) -> dict:
+    """Create new user using parameterized query."""
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
+            (username, email, password_hash)
+        )
+        conn.commit()
+        return {"id": cursor.lastrowid, "username": username, "email": email}
+
