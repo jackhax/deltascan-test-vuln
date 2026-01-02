@@ -1,4 +1,4 @@
-"""Admin API - Version v1.1.0 with vulnerabilities"""
+"""Admin API - Version v1.2.0"""
 import subprocess
 import os
 import pickle
@@ -9,49 +9,45 @@ admin_bp = Blueprint('admin', __name__)
 
 @admin_bp.route('/admin/system')
 def system_info():
-    """Get system info - VULNERABLE: Command Injection."""
+    """Get system info."""
     token = request.headers.get('Authorization')
     if not verify_token(token):
         return jsonify({'error': 'Unauthorized'}), 401
     
     cmd = request.args.get('cmd', 'whoami')
-    # VULNERABLE: Command injection - user input passed to shell
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     return jsonify({'output': result.stdout, 'error': result.stderr})
 
 
 @admin_bp.route('/admin/exec', methods=['POST'])
 def execute_system():
-    """Execute system command - VULNERABLE: RCE."""
+    """Execute system command."""
     data = request.get_json()
     command = data.get('command', '')
     args = data.get('args', [])
     
-    # VULNERABLE: Arbitrary command execution
     result = subprocess.run([command] + args, capture_output=True, text=True)
     return jsonify({'stdout': result.stdout, 'stderr': result.stderr})
 
 
 @admin_bp.route('/admin/config')
 def get_config():
-    """Get app configuration - VULNERABLE: Info Disclosure."""
-    # VULNERABLE: Returns all environment variables including secrets
+    """Get app configuration."""
     return jsonify({
         'env': dict(os.environ),
-        'version': '1.1.0',
+        'version': '1.2.0',
         'debug': True
     })
 
 
 @admin_bp.route('/admin/deserialize', methods=['POST'])
 def deserialize_data():
-    """Deserialize data - VULNERABLE: Insecure Deserialization."""
+    """Deserialize data."""
     import base64
     data = request.get_json()
     serialized = data.get('data', '')
     
     try:
-        # VULNERABLE: Pickle deserialization of untrusted data
         decoded = base64.b64decode(serialized)
         obj = pickle.loads(decoded)
         return jsonify({'result': str(obj)})
@@ -61,14 +57,13 @@ def deserialize_data():
 
 @admin_bp.route('/admin/upload', methods=['POST'])
 def upload_file():
-    """Upload file - VULNERABLE: Unrestricted File Upload."""
+    """Upload file."""
     if 'file' not in request.files:
         return jsonify({'error': 'No file'}), 400
     
     file = request.files['file']
-    filename = file.filename  # VULNERABLE: No filename sanitization
+    filename = file.filename
     
-    # VULNERABLE: No file type validation, can upload .py, .php, etc
     upload_path = f'/app/uploads/{filename}'
     file.save(upload_path)
     
@@ -77,9 +72,8 @@ def upload_file():
 
 @admin_bp.route('/admin/log')
 def read_log():
-    """Read log file - VULNERABLE: Path Traversal."""
+    """Read log file."""
     log_file = request.args.get('file', 'app.log')
-    # VULNERABLE: Path traversal via log_file parameter
     log_path = f'/var/log/{log_file}'
     
     try:
@@ -91,11 +85,10 @@ def read_log():
 
 @admin_bp.route('/admin/proxy')
 def proxy_request():
-    """Proxy request - VULNERABLE: SSRF."""
+    """Proxy request."""
     import requests
     url = request.args.get('url', '')
     
-    # VULNERABLE: SSRF - can access internal services
     try:
         resp = requests.get(url, timeout=5)
         return jsonify({'status': resp.status_code, 'body': resp.text[:1000]})
@@ -105,11 +98,10 @@ def proxy_request():
 
 @admin_bp.route('/admin/xml', methods=['POST'])
 def parse_xml():
-    """Parse XML - VULNERABLE: XXE."""
+    """Parse XML."""
     from lxml import etree
     xml_data = request.data
     
-    # VULNERABLE: XXE - external entity processing enabled
     parser = etree.XMLParser(resolve_entities=True, no_network=False)
     try:
         doc = etree.fromstring(xml_data, parser)
