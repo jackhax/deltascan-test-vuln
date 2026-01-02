@@ -1,11 +1,17 @@
 """Main application module."""
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from utils.auth import authenticate_user, hash_password
 from utils.database import get_user_by_id, create_user
-from utils.validators import validate_email, validate_username
+from utils.validators import validate_email, validate_username, sanitize_filename
+from utils.search import search_users
+from utils.file_handler import get_file_info, read_file_content
+from api.webhooks import webhooks_bp
+from api.imports import imports_bp
 
 app = Flask(__name__)
+app.register_blueprint(webhooks_bp)
+app.register_blueprint(imports_bp)
 
 
 @app.route("/api/users/<int:user_id>", methods=["GET"])
@@ -51,6 +57,39 @@ def login():
     return jsonify({"error": "Invalid credentials"}), 401
 
 
+@app.route("/api/search", methods=["GET"])
+def search():
+    """Search for users."""
+    query = request.args.get("q", "")
+    if not query:
+        return jsonify({"error": "Missing search query"}), 400
+    
+    results = search_users(query)
+    return jsonify({"results": results})
+
+
+@app.route("/api/files/<path:filename>", methods=["GET"])
+def get_file(filename):
+    """Get file information."""
+    info = get_file_info(filename)
+    return jsonify(info)
+
+
+@app.route("/api/files/<path:filename>/content", methods=["GET"])
+def get_file_content(filename):
+    """Get file content."""
+    content = read_file_content(filename)
+    return jsonify({"content": content})
+
+
+@app.route("/api/download", methods=["GET"])
+def download_file():
+    """Download a file."""
+    filename = request.args.get("file", "")
+    safe_name = sanitize_filename(filename)
+    filepath = f"/var/uploads/{safe_name}"
+    return send_file(filepath)
+
+
 if __name__ == "__main__":
     app.run(debug=False)
-
