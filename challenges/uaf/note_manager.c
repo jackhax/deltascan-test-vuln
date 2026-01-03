@@ -1,11 +1,6 @@
 /*
  * Note Manager - A simple note-taking application
- *
- * Challenge: Find and exploit the Use-After-Free vulnerability
- * to call the secret admin function.
- *
- * Compile: gcc -o note_manager note_manager.c -fno-stack-protector -no-pie
- * (Disable protections for educational purposes)
+ * Compile: make
  */
 
 #include <stdio.h>
@@ -36,18 +31,10 @@ void view_note_handler(void) {
     printf("[*] Note viewed successfully\n");
 }
 
-// Secret admin function - target for exploitation
 void admin_panel(void) {
     admin_accessed = 1;
-    printf("\n");
-    printf("╔══════════════════════════════════════╗\n");
-    printf("║     🎉 ADMIN PANEL ACCESSED! 🎉     ║\n");
-    printf("║                                      ║\n");
-    printf("║   UAF Exploitation Successful!       ║\n");
-    printf("║   Flag: CTF{us3_4ft3r_fr33_pwn3d}   ║\n");
-    printf("║                                      ║\n");
-    printf("╚══════════════════════════════════════╝\n");
-    printf("\n");
+    printf("\n[!] ADMIN PANEL ACCESSED\n");
+    printf("[!] Exploitation successful!\n\n");
 }
 
 // Create a new note
@@ -110,7 +97,6 @@ int view_note(int index) {
 
     printf("[*] Note %d: %s\n", index, notes[index]->content);
 
-    // Call the handler - VULNERABLE: doesn't check if memory is still valid
     if (notes[index]->on_view != NULL) {
         notes[index]->on_view();
     }
@@ -118,7 +104,6 @@ int view_note(int index) {
     return 0;
 }
 
-// Delete a note - VULNERABLE: doesn't NULL the pointer
 int delete_note(int index) {
     if (index < 0 || index >= MAX_NOTES) {
         printf("[-] Invalid index\n");
@@ -130,18 +115,12 @@ int delete_note(int index) {
         return -1;
     }
 
-    printf("[DEBUG] Freeing note at %p\n", (void *)notes[index]);
     free(notes[index]);
-
-    // BUG: Pointer not set to NULL after free!
-    // This creates a dangling pointer -> Use-After-Free
-    // notes[index] = NULL;  // <-- This line is missing!
-
     printf("[+] Note deleted at index %d\n", index);
     return 0;
 }
 
-// Allocate a buffer of user-specified size (for heap manipulation)
+// Allocate a custom buffer
 void *alloc_buffer(size_t size) {
     void *buf = malloc(size);
     printf("[DEBUG] Allocated buffer at %p (size: %zu)\n", buf, size);
@@ -197,12 +176,7 @@ int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stdin, NULL, _IONBF, 0);
 
-    printf("╔════════════════════════════════════════╗\n");
-    printf("║      Note Manager - UAF Challenge      ║\n");
-    printf("║                                        ║\n");
-    printf("║  Objective: Call admin_panel()         ║\n");
-    printf("║  Hint: Check the delete function...    ║\n");
-    printf("╚════════════════════════════════════════╝\n");
+    printf("=== Note Manager v1.0 ===\n");
 
     while (1) {
         print_menu();
