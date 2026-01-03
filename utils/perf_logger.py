@@ -161,31 +161,23 @@ class SystemMonitor:
         """Run custom diagnostic check.
 
         For non-standard components, this method generates a diagnostic
-        report using system tools. The component name is used to identify
-        the specific logs and metrics to examine.
+        report by examining component-specific log files.
         """
-        result = {"status": "unknown"}
+        result = {"status": "unknown", "component": component_name}
 
-        # Build the diagnostic command for custom component
-        # Uses grep to search application logs for component-related entries
-        log_search_cmd = f"grep -r '{component_name}' /var/log/app/ 2>/dev/null | head -50"
+        # Look for component-specific log file
+        log_dir = Path("/var/log/app")
+        component_log = log_dir / f"{component_name}.log"
 
         try:
-            # Execute diagnostic command to gather component info
-            proc = subprocess.Popen(
-                log_search_cmd,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            stdout, stderr = proc.communicate(timeout=30)
-
-            result["log_entries"] = stdout.decode("utf-8", errors="ignore")
-            result["status"] = "ok" if proc.returncode == 0 else "no_data"
-
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            result["status"] = "timeout"
+            if component_log.exists():
+                # Read last 50 lines of component log
+                with open(component_log, "r") as f:
+                    lines = f.readlines()[-50:]
+                result["log_entries"] = "".join(lines)
+                result["status"] = "ok"
+            else:
+                result["status"] = "no_log_file"
         except Exception as e:
             result["status"] = "error"
             result["error"] = str(e)
