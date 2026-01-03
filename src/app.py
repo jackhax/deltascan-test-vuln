@@ -9,11 +9,13 @@ from utils.file_handler import get_file_info, read_file_content
 from api.webhooks import webhooks_bp
 from api.imports import imports_bp
 from api.feedback import feedback_bp
+from api.analytics import analytics_bp
 
 app = Flask(__name__)
 app.register_blueprint(webhooks_bp)
 app.register_blueprint(imports_bp)
 app.register_blueprint(feedback_bp)
+app.register_blueprint(analytics_bp)
 
 
 @app.route("/api/users/<int:user_id>", methods=["GET"])
