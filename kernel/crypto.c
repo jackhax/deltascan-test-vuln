@@ -35,6 +35,7 @@
  */
 
 #include <crypto/aead.h>
+#include <kunit/test-bug.h>
 #include <crypto/aes.h>
 #include <crypto/rng.h>
 #include "crypto.h"
@@ -597,6 +598,10 @@ static int tipc_aead_init(struct tipc_aead **aead, struct tipc_aead_key *ukey,
 	tmp->cloned = NULL;
 	tmp->authsize = TIPC_AES_GCM_TAG_SIZE;
 	tmp->key = kmemdup(ukey, tipc_aead_key_size(ukey), GFP_KERNEL);
+	if (!tmp->key) {
+		tipc_aead_free(&tmp->rcu);
+		return -ENOMEM;
+	}
 	memcpy(&tmp->salt, ukey->key + keylen, TIPC_AES_GCM_SALT_SIZE);
 	atomic_set(&tmp->users, 0);
 	atomic64_set(&tmp->seqno, 0);
@@ -757,21 +762,10 @@ static int tipc_aead_encrypt(struct tipc_aead *aead, struct sk_buff *skb,
 			 skb_tailroom(skb), tailen);
 	}
 
-	if (unlikely(!skb_cloned(skb) && tailen <= skb_tailroom(skb))) {
-		nsg = 1;
-		trailer = skb;
-	} else {
-		/* TODO: We could avoid skb_cow_data() if skb has no frag_list
-		 * e.g. by skb_fill_page_desc() to add another page to the skb
-		 * with the wanted tailen... However, page skbs look not often,
-		 * so take it easy now!
-		 * Cloned skbs e.g. from link_xmit() seems no choice though :(
-		 */
-		nsg = skb_cow_data(skb, tailen, &trailer);
-		if (unlikely(nsg < 0)) {
-			pr_err("TX: skb_cow_data() returned %d\n", nsg);
-			return nsg;
-		}
+	nsg = skb_cow_data(skb, tailen, &trailer);
+	if (unlikely(nsg < 0)) {
+		pr_err("TX: skb_cow_data() returned %d\n", nsg);
+		return nsg;
 	}
 
 	pskb_put(skb, trailer, tailen);
@@ -1468,12 +1462,10 @@ int tipc_crypto_start(struct tipc_crypto **crypto, struct net *net,
 
 	if (*crypto)
 		return -EEXIST;
-
 	/* Allocate crypto */
 	c = kzalloc(sizeof(*c), GFP_ATOMIC);
 	if (!c)
 		return -ENOMEM;
-
 	/* Allocate workqueue on TX */
 	if (!node) {
 		c->wq = alloc_ordered_workqueue("tipc_crypto", 0);
@@ -1504,6 +1496,7 @@ int tipc_crypto_start(struct tipc_crypto **crypto, struct net *net,
 	c->timer2 = jiffies;
 	c->rekeying_intv = TIPC_REKEYING_INTV_DEF;
 	spin_lock_init(&c->lock);
+
 	scnprintf(c->name, 48, "%s(%s)", (is_rx(c)) ? "RX" : "TX",
 		  (is_rx(c)) ? tipc_node_get_id_str(c->node) :
 			       tipc_own_id_string(c->net));
@@ -1514,6 +1507,7 @@ int tipc_crypto_start(struct tipc_crypto **crypto, struct net *net,
 		INIT_DELAYED_WORK(&c->work, tipc_crypto_work_tx);
 
 	*crypto = c;
+
 	return 0;
 }
 
@@ -1967,7 +1961,8 @@ rcv:
 
 	skb_reset_network_header(*skb);
 	skb_pull(*skb, tipc_ehdr_size(ehdr));
-	pskb_trim(*skb, (*skb)->len - aead->authsize);
+	if (pskb_trim(*skb, (*skb)->len - aead->authsize))
+		goto free_skb;
 
 	/* Validate TIPCv2 message */
 	if (unlikely(!tipc_msg_validate(skb))) {
@@ -1977,6 +1972,9 @@ rcv:
 
 	/* Ok, everything's fine, try to synch own keys according to peers' */
 	tipc_crypto_key_synch(rx, *skb);
+
+	/* Re-fetch skb cb as skb might be changed in tipc_msg_validate */
+	skb_cb = TIPC_SKB_CB(*skb);
 
 	/* Mark skb decrypted */
 	skb_cb->decrypted = 1;
@@ -2280,40 +2278,31 @@ static int tipc_crypto_key_xmit(struct net *net, struct tipc_aead_key *skey,
  */
 static bool tipc_crypto_key_rcv(struct tipc_crypto *rx, struct tipc_msg *hdr)
 {
-	struct tipc_crypto *tx = tipc_net(rx->net)->crypto_tx;
+
+	struct tipc_crypto *tx  = NULL;
 	struct tipc_aead_key *skey = NULL;
 	u16 key_gen = msg_key_gen(hdr);
-	u16 size = msg_data_sz(hdr);
+	u32 size = msg_data_sz(hdr);
 	u8 *data = msg_data(hdr);
 	unsigned int keylen;
-
-	/* Verify whether the size can exist in the packet */
-	if (unlikely(size < sizeof(struct tipc_aead_key) + TIPC_AEAD_KEYLEN_MIN)) {
-		pr_debug("%s: message data size is too small\n", rx->name);
-		goto exit;
+	
+	if(rx->net){
+		tx = tipc_net(rx->net)->crypto_tx;
 	}
-
 	keylen = ntohl(*((__be32 *)(data + TIPC_AEAD_ALG_NAME)));
-
-	/* Verify the supplied size values */
-	if (unlikely(size != keylen + sizeof(struct tipc_aead_key) ||
-		     keylen > TIPC_AEAD_KEY_SIZE_MAX)) {
-		pr_debug("%s: invalid MSG_CRYPTO key size\n", rx->name);
-		goto exit;
-	}
 
 	spin_lock(&rx->lock);
 	if (unlikely(rx->skey || (key_gen == rx->key_gen && rx->key.keys))) {
 		pr_err("%s: key existed <%p>, gen %d vs %d\n", rx->name,
 		       rx->skey, key_gen, rx->key_gen);
-		goto exit_unlock;
+		goto exit;
 	}
 
 	/* Allocate memory for the key */
 	skey = kmalloc(size, GFP_ATOMIC);
 	if (unlikely(!skey)) {
 		pr_err("%s: unable to allocate memory for skey\n", rx->name);
-		goto exit_unlock;
+		goto exit;
 	}
 
 	/* Copy key from msg data */
@@ -2328,14 +2317,13 @@ static bool tipc_crypto_key_rcv(struct tipc_crypto *rx, struct tipc_msg *hdr)
 	rx->nokey = 0;
 	mb(); /* for nokey flag */
 
-exit_unlock:
-	spin_unlock(&rx->lock);
-
 exit:
+	spin_unlock(&rx->lock);
 	/* Schedule the key attaching on this crypto */
+	if (rx->net){
 	if (likely(skey && queue_delayed_work(tx->wq, &rx->work, 0)))
 		return true;
-
+	}
 	return false;
 }
 
@@ -2476,3 +2464,7 @@ resched:
 	/* Re-schedule rekeying if any */
 	tipc_crypto_rekeying_sched(tx, false, 0);
 }
+
+#ifdef CONFIG_TIPC_TEST
+#include "tipc_test.c"
+#endif
