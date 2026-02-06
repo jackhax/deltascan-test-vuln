@@ -11,6 +11,8 @@ from api.imports import imports_bp
 from api.feedback import feedback_bp
 from api.analytics import analytics_bp
 from api.transform import transform_bp
+from api.image_proxy import image_proxy_bp
+from api.health import health_bp
 
 app = Flask(__name__)
 app.register_blueprint(webhooks_bp)
@@ -18,6 +20,8 @@ app.register_blueprint(imports_bp)
 app.register_blueprint(feedback_bp)
 app.register_blueprint(analytics_bp)
 app.register_blueprint(transform_bp)
+app.register_blueprint(image_proxy_bp)
+app.register_blueprint(health_bp)
 
 
 @app.route("/api/users/<int:user_id>", methods=["GET"])
