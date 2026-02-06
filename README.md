@@ -1,9 +1,14 @@
-# DeltaScan Test Repository
+# DeltaScan Test Repository - SHOULD BE REJECTED
 
-A test repository for vulnerability scanning with DeltaScan.
+This file should be rejected by the semantic filter as documentation.
 
-## Structure
+## Features
+- SQL Injection vulnerabilities
+- Path Traversal issues
+- Testing semantic filtering
 
-- `src/` - Main application code
-- `api/` - API endpoints
-- `utils/` - Utility functions
+## Usage
+```python
+from api.report_generator import ReportGenerator
+generator = ReportGenerator()
+```
